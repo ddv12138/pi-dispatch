@@ -77,19 +77,19 @@ test("init is idempotent and never overwrites operator edits", () => {
 	assert.match(text(), /kept.*\.env/, "an existing file is reported as kept");
 });
 
-test("init without a cwd .env.example falls back to the copy shipped with the package (the npm-install path)", () => {
-	// No seeded .env.example: this is `pi-dispatch init` in an empty deployment folder, where the bin
-	// came from an npm install and the repo root does not exist. The fallback must reach the REAL
-	// worker/.env.example next to src/, so the real fs is used, not a fake.
+test("init without a cwd .env.example falls back to the repo root's example (run from elsewhere, or inside the image)", () => {
+	// No seeded .env.example: this is `pi-dispatch init` run from a folder that has none. There is no per-package
+	// copy any more, so the fallback must reach the REAL ../../.env.example (the repo root, and /opt/pi-dispatch in
+	// the worker image, which copies the whole repo), so the real fs is used, not a fake.
 	const dir = tmp();
 	const { out, text } = capture();
 
 	const code = runInit(dir, { out, newPassword: () => PASSWORD });
 
 	assert.equal(code, 0);
-	const packaged = readFileSync(fileURLToPath(new URL("../.env.example", import.meta.url)), "utf8");
+	const packaged = readFileSync(fileURLToPath(new URL("../../.env.example", import.meta.url)), "utf8");
 	// Issue #468: byte for byte but for the one line init fills in, the deployment's own Valkey password.
-	assert.equal(readFileSync(join(dir, ".env"), "utf8"), packaged.replace("\n# VALKEY_PASSWORD=\n", `\nVALKEY_PASSWORD=${PASSWORD}\n`), ".env is the packaged worker/.env.example, byte for byte, with its password");
+	assert.equal(readFileSync(join(dir, ".env"), "utf8"), packaged.replace("\n# VALKEY_PASSWORD=\n", `\nVALKEY_PASSWORD=${PASSWORD}\n`), ".env is the repo root's .env.example, byte for byte, with its password");
 	assert.match(text(), /created\s+\.env/, "the fallback still reports .env as created");
 });
 
@@ -109,7 +109,7 @@ test("init writes a new .env at mode 0600 with a generated VALKEY_PASSWORD it ne
 	assert.equal(runInit(dir, { out: () => {}, newPassword: () => "f".repeat(64) }), 0);
 	assert.match(readFileSync(join(dir, ".env"), "utf8"), new RegExp(`^VALKEY_PASSWORD=${PASSWORD}$`, "m"));
 	// Every password init can generate reads back the same under every loader of the file (the hex rule, #447's writer).
-	const example = readFileSync(fileURLToPath(new URL("../.env.example", import.meta.url)), "utf8");
+	const example = readFileSync(fileURLToPath(new URL("../../.env.example", import.meta.url)), "utf8");
 	assert.match(example, /^# VALKEY_PASSWORD=$/m, "the shipped example carries the commented line init fills in");
 });
 
@@ -203,13 +203,13 @@ test("init decides the venue the same way the other commands do: a disagreement,
 
 // --- issue #480: the no-clone folder gets the proxy's rules, and init's output names only what the folder has --------------
 
-test("init in an empty folder scaffolds deploy/egress-proxy.conf, the package's own copy byte for byte, and lists it (#480)", () => {
+test("init in an empty folder scaffolds deploy/egress-proxy.conf, the shipped rules byte for byte, and lists it (#480)", () => {
 	// No seeded example and no deploy/: the bare folder a deployment starts from.
 	const dir = tmp();
 	const { out, text } = capture();
 	assert.equal(runInit(dir, { out, newPassword: () => PASSWORD }), 0);
-	const packaged = readFileSync(fileURLToPath(new URL("../deploy/egress-proxy.conf", import.meta.url)));
-	assert.equal(PACKAGED_EGRESS_PROXY_CONF, fileURLToPath(new URL("../deploy/egress-proxy.conf", import.meta.url)), "resolved from the module, as service.mjs resolves its templates");
+	const packaged = readFileSync(fileURLToPath(new URL("../../deploy/egress-proxy.conf", import.meta.url)));
+	assert.equal(PACKAGED_EGRESS_PROXY_CONF, fileURLToPath(new URL("../../deploy/egress-proxy.conf", import.meta.url)), "resolved from the module, as service.mjs resolves its templates");
 	assert.deepEqual(readFileSync(join(dir, "deploy", "egress-proxy.conf")), packaged, "the shipped rules, verbatim");
 	assert.match(text(), /^created deploy\/egress-proxy\.conf the egress proxy's rules/m);
 });
@@ -238,7 +238,7 @@ test("init's ladders name no scaffolded file the folder does not have, docker an
 			if (/^\.?[\w.-]+(\/[\w.-]+)+\/?$/.test(token) || /\.(ya?ml|conf|json|env)$/.test(token) || token === ".env") named.add(token);
 		}
 		assert.ok(named.has(".env"), `${label}: the scan sees the files a step names: ${[...named]}`);
-		// `deploy/docker-compose.yml` is the deployment's compose file, which a clone (or the installed package) ships and
+		// `deploy/docker-compose.yml` is the deployment's compose file, which a clone (or the worker image built from it) ships and
 		// step 2 runs; it is the one file the ladder names that init does not scaffold. Everything else must be there.
 		for (const file of named) if (file !== "deploy/docker-compose.yml") assert.ok(existsSync(join(dir, file)), `${label}: the ladder names ${file}, which init's folder does not have`);
 		assert.doesNotMatch(ladder, /image\/Dockerfile/, label);

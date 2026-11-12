@@ -199,7 +199,7 @@ export async function olderStateFindings({ cwd, home, readFile, valkeyContainer,
 				// The command /dispatch setup runs for this folder: its project, and the hand-over override where it wrote one.
 				const project = composeProjectName(cwd);
 				const override = (await textOf(readFile, join(cwd, COMPOSE_VALKEY_OVERRIDE))) !== null;
-				const line = `change that line to \`image: ${VALKEY_IMAGE}\` (the installed package's ${COMPOSE_FILE} has it)`;
+				const line = `change that line to \`image: ${VALKEY_IMAGE}\` (this release's ${COMPOSE_FILE} has it)`;
 				findings.push({
 					store: "valkey-compose",
 					label: `${path} names ${found} for Valkey, the floating tag an older pi-dispatch shipped, which moves this host to a newer Valkey minor on its next pull; ${PINS}`,

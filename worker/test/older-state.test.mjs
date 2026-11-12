@@ -68,7 +68,7 @@ test("the compose fix is the command /dispatch setup runs for that folder: its p
 // recreate stays.
 test("beside a container this deployment's up runs, the compose fix changes the line only and recreates nothing (#761)", async () => {
 	const compose = { [COMPOSE]: composeWith("    image: valkey/valkey:8") };
-	const lineOnly = "change that line to `image: valkey/valkey:8.1` (the installed package's deploy/docker-compose.yml has it) and nothing more: this deployment's Valkey is the pi-dispatch-valkey container an older release started, not compose's, so recreating compose's valkey from this file would start a second, empty Valkey beside the queue";
+	const lineOnly = "change that line to `image: valkey/valkey:8.1` (this release's deploy/docker-compose.yml has it) and nothing more: this deployment's Valkey is the pi-dispatch-valkey container an older release started, not compose's, so recreating compose's valkey from this file would start a second, empty Valkey beside the queue";
 	// Both findings together: the container's fix recreates up's container, the compose file's only changes its line.
 	const both = await findings(compose, () => ours("valkey/valkey:8"));
 	assert.deepEqual(both.map((f) => f.store), ["valkey-compose", "valkey-container"]);
@@ -78,7 +78,7 @@ test("beside a container this deployment's up runs, the compose fix changes the 
 	const fixed = await findings(compose, async () => ours(VALKEY_IMAGE));
 	assert.deepEqual(fixed.map((f) => [f.store, f.fix]), [["valkey-compose", lineOnly]]);
 	// Compose alone: the recreate, word for word as before.
-	const recreate = "change that line to `image: valkey/valkey:8.1` (the installed package's deploy/docker-compose.yml has it), then recreate Valkey from /srv/My Deploy with `docker compose -p mydeploy --env-file .env -f deploy/docker-compose.yml up -d valkey` (leave out `-p mydeploy` if you run this file without it), which stops it first, so it writes its AOF out, and keeps its volume and the queue in it. A job running right now is interrupted: pause first if one is (pi-dispatch pause, wait for active jobs, then pi-dispatch resume)";
+	const recreate = "change that line to `image: valkey/valkey:8.1` (this release's deploy/docker-compose.yml has it), then recreate Valkey from /srv/My Deploy with `docker compose -p mydeploy --env-file .env -f deploy/docker-compose.yml up -d valkey` (leave out `-p mydeploy` if you run this file without it), which stops it first, so it writes its AOF out, and keeps its volume and the queue in it. A job running right now is interrupted: pause first if one is (pi-dispatch pause, wait for active jobs, then pi-dispatch resume)";
 	assert.deepEqual((await findings(compose)).map((f) => f.fix), [recreate]);
 	// Compose runs the Valkey (handed over), or doctor cannot tell whose it is: the recreate stays.
 	const cannotTell = [

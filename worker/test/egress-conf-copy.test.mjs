@@ -10,8 +10,8 @@ import { PACKAGED_EGRESS_PROXY_CONF, backupStamp, describeConfDifference, judgeP
 const NOW = () => Date.UTC(2026, 8, 29, 10, 15, 0);
 
 test("the package's rules are the shipped deploy/egress-proxy.conf, read from the module (#484)", () => {
-	assert.equal(PACKAGED_EGRESS_PROXY_CONF, new URL("../deploy/egress-proxy.conf", import.meta.url).pathname);
-	assert.equal(readPackagedProxyConf(), readFileSync(new URL("../deploy/egress-proxy.conf", import.meta.url), "utf8"));
+	assert.equal(PACKAGED_EGRESS_PROXY_CONF, new URL("../../deploy/egress-proxy.conf", import.meta.url).pathname);
+	assert.equal(readPackagedProxyConf(), readFileSync(new URL("../../deploy/egress-proxy.conf", import.meta.url), "utf8"));
 });
 
 test("a copy is judged absent, the same, differing (with a line count) or unreadable, and the package's failure is its own state (#484)", () => {

@@ -95,17 +95,16 @@ export function runInit(cwd = process.cwd(), deps = {}) {
 	};
 	const envPath = join(cwd, ".env");
 	try {
-		// .env from the example. Prefer the copy in cwd (the clone's repo root); fall back to the copy
-		// SHIPPED with the worker package (worker/.env.example, kept byte-identical to the root example by
-		// worker/test/publish.test.mjs) so init works both from elsewhere in a checkout and from an npm
-		// install, where the repo root does not exist.
+		// .env from the example. Prefer the copy in cwd (the clone's repo root); fall back to the repo root's
+		// example, resolved from this module so init works from elsewhere in a checkout and inside the worker
+		// image, which copies the whole repo and has no per-package copy any more (worker/test/deploy-layout.test.mjs).
 		if (fs.existsSync(envPath)) {
 			results.push(["kept", ".env", KEPT]);
 		} else {
 			const cwdExample = join(cwd, ".env.example");
 			const source = fs.existsSync(cwdExample)
 				? cwdExample
-				: fileURLToPath(new URL("../.env.example", import.meta.url));
+				: fileURLToPath(new URL("../../.env.example", import.meta.url));
 			// Issue #468: the new file carries this deployment's own Valkey password (the example's `# VALKEY_PASSWORD=` line
 			// filled in, never shown) and is created readable by this account alone: it holds that password and, soon, the
 			// provider key. `wx`: a file that appeared since the check above is never overwritten (init's contract).
@@ -153,7 +152,7 @@ export function runInit(cwd = process.cwd(), deps = {}) {
 		if (deployRefusal) {
 			results.push(["refused", "deploy/egress-proxy.conf", `deploy/ here is ${deployRefusal}, so init writes nothing into it: make deploy/ a directory of this folder, then run \`pi-dispatch init\` again`]);
 		} else {
-			scaffold(fs, results, join(deployDir, "egress-proxy.conf"), () => readPackageFile(PACKAGED_EGRESS_PROXY_CONF), "the egress proxy's rules, the package's copy (shipped, not edited; the hosts go in the allowlist)", "deploy/egress-proxy.conf");
+			scaffold(fs, results, join(deployDir, "egress-proxy.conf"), () => readPackageFile(PACKAGED_EGRESS_PROXY_CONF), "the egress proxy's rules, shipped with this release (not edited; the hosts go in the allowlist)", "deploy/egress-proxy.conf");
 		}
 	} catch (err) {
 		printList();

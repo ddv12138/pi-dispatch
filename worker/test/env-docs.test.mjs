@@ -599,15 +599,12 @@ test("the header states the `$` rule, because no reader expands it (#394)", () =
 	// lines, and a mutation deleting them left the whole suite green.
 	//
 	// The claim, not the wording: it must name the variable expansion, say the value is read literally, name
-	// compose as the reader that does not expand it, and tell the operator what to do instead. Asserted on the
-	// mirror as well, because they are byte-identical by a separate pin and this one would otherwise pass on a
-	// file nobody ships.
-	for (const rel of ["../../.env.example", "../.env.example"]) {
-		const text = readFileSync(new URL(rel, import.meta.url), "utf8");
-		const header = text.slice(0, text.indexOf("# --- "));
-		assert.match(header, /\$HOME/, `${rel}: the header names the shape an operator would write`);
-		assert.match(header, /literal/i, `${rel}: and says the value is read literally`);
-		assert.match(header, /compose/, `${rel}: naming the reader that does not expand it`);
-		assert.match(header, /Write path values out in full/, `${rel}: and what to do instead`);
-	}
+	// compose as the reader that does not expand it, and tell the operator what to do instead. One file now: the
+	// npm-package mirror worker/.env.example left when publishing did (worker/test/deploy-layout.test.mjs).
+	const text = readFileSync(new URL("../../.env.example", import.meta.url), "utf8");
+	const header = text.slice(0, text.indexOf("# --- "));
+	assert.match(header, /\$HOME/, "the header names the shape an operator would write");
+	assert.match(header, /literal/i, "and says the value is read literally");
+	assert.match(header, /compose/, "naming the reader that does not expand it");
+	assert.match(header, /Write path values out in full/, "and what to do instead");
 });

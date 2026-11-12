@@ -25,17 +25,15 @@ test("VALKEY_IMAGE is a Docker Hub valkey minor, never a floating major, a patch
 	assert.equal(olderValkeyImage(`docker.io/${VALKEY_IMAGE}`), null);
 });
 
-test("the compose file, and its published mirror, name VALKEY_IMAGE on their one image line (#761)", () => {
-	for (const dir of ["deploy", "worker/deploy"]) {
-		const compose = codeLines(read(`${dir}/docker-compose.yml`));
-		const valkeyImages = compose.filter((l) => /^\s*image:\s*\S*valkey/.test(l));
-		assert.deepEqual(valkeyImages, [`    image: ${VALKEY_IMAGE}`], `${dir}/docker-compose.yml`);
-		// It is the valkey service's own line: the first image line after `  valkey:`.
-		const at = compose.indexOf("  valkey:");
-		assert.ok(at >= 0);
-		assert.equal(compose.slice(at + 1).find((l) => /^\s*image:/.test(l)), `    image: ${VALKEY_IMAGE}`);
-		// The Quadlet unit that pinned the same image beside compose went with the venues that installed it.
-	}
+test("the compose file names VALKEY_IMAGE on its one image line (#761)", () => {
+	const compose = codeLines(read("deploy/docker-compose.yml"));
+	const valkeyImages = compose.filter((l) => /^\s*image:\s*\S*valkey/.test(l));
+	assert.deepEqual(valkeyImages, [`    image: ${VALKEY_IMAGE}`], "deploy/docker-compose.yml");
+	// It is the valkey service's own line: the first image line after `  valkey:`.
+	const at = compose.indexOf("  valkey:");
+	assert.ok(at >= 0);
+	assert.equal(compose.slice(at + 1).find((l) => /^\s*image:/.test(l)), `    image: ${VALKEY_IMAGE}`);
+	// The Quadlet unit that pinned the same image beside compose went with the venues that installed it.
 });
 
 test("up's docker run and the owner check run VALKEY_IMAGE (#761)", () => {

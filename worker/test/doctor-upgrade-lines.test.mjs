@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { PACKAGE_VERSION } from "../src/egress-conf-copy.mjs";
+import { RELEASE_VERSION } from "../src/egress-conf-copy.mjs";
 import { fleetVersionChecks } from "../src/doctor.mjs";
 import { serviceEnvFileOf } from "../src/service-env.mjs";
 import { NAMED_CHECK_IDS, assignCheckIds } from "../src/doctor-results.mjs";
@@ -116,15 +116,15 @@ function collect({ hosts = [], plan = { "docker info": 0, "docker image": 0 }, s
 }
 
 test("through the collection: this host's row and its peers' are compared, with this doctor's own package version", async () => {
-	const { checks } = await collect({ hosts: [row("mini1", "0.0.1-old"), row("mini2", PACKAGE_VERSION)] });
+	const { checks } = await collect({ hosts: [row("mini1", "0.0.1-old"), row("mini2", RELEASE_VERSION)] });
 	const line = checks.find((c) => c.id === "fleet.versions");
-	assert.equal(line.label, `pi-dispatch versions differ: the live workers report 2 versions: ${["0.0.1-old (mini1)", `${PACKAGE_VERSION} (mini2)`].sort().join(", ")}; this doctor ${PACKAGE_VERSION}, this host's worker row reports 0.0.1-old`);
+	assert.equal(line.label, `pi-dispatch versions differ: the live workers report 2 versions: ${["0.0.1-old (mini1)", `${RELEASE_VERSION} (mini2)`].sort().join(", ")}; this doctor ${RELEASE_VERSION}, this host's worker row reports 0.0.1-old`);
 	// After the fleet's own lines.
 	assert.ok(checks.findIndex((c) => typeof c.label === "string" && c.label.startsWith("Fleet: 2 workers")) < checks.indexOf(line));
 	// A single host running this doctor's version, and a fleet whose rows publish none, say nothing new.
-	assert.equal((await collect({ hosts: [row("mini1", PACKAGE_VERSION)] })).checks.some((c) => c.id === "fleet.versions"), false);
+	assert.equal((await collect({ hosts: [row("mini1", RELEASE_VERSION)] })).checks.some((c) => c.id === "fleet.versions"), false);
 	assert.equal((await collect({ hosts: [row("mini2")] })).checks.some((c) => c.id === "fleet.versions"), false);
-	assert.equal((await collect({ hosts: [row("mini1", PACKAGE_VERSION), row("mini2", PACKAGE_VERSION)] })).checks.find((c) => c.id === "fleet.versions").ok, true);
+	assert.equal((await collect({ hosts: [row("mini1", RELEASE_VERSION), row("mini2", RELEASE_VERSION)] })).checks.find((c) => c.id === "fleet.versions").ok, true);
 });
 
 test("through the collection: each older-state finding is one state.older warning, after the state lines, printable", async () => {
@@ -299,7 +299,7 @@ test("state.older beside up's container: the compose file's fix changes its line
 	const { checks } = await collect({ files: compose, env: LOCAL_VALKEY, seams: { olderStateFindings: undefined }, plan: (cwd) => ({ "docker info": 0, "docker image": 0, "docker container inspect": valkeyRecord({ label: cwd }) }) });
 	const found = checks.filter((c) => c.id === "state.older");
 	assert.equal(found.length, 2);
-	assert.match(found[0].fix, /^change that line to `image: valkey\/valkey:8\.1` \(the installed package's deploy\/docker-compose\.yml has it\) and nothing more: /);
+	assert.match(found[0].fix, /^change that line to `image: valkey\/valkey:8\.1` \(this release's deploy\/docker-compose\.yml has it\) and nothing more: /);
 	assert.doesNotMatch(found[0].fix, /up -d valkey/);
 	assert.match(found[1].fix, /^`docker stop pi-dispatch-valkey && docker rm pi-dispatch-valkey` in the deployment folder, then `docker compose --env-file \.env -f deploy\/docker-compose\.yml up -d`/);
 });

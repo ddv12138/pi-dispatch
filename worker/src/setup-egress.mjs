@@ -2,8 +2,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { deploymentServiceEnv } from "./service-env.mjs";
 import { egressArmed, egressProxyName, DEFAULT_EGRESS_PROXY } from "./egress.mjs";
 import { makeDockerEndpointResolver } from "./backend-local.mjs";
@@ -49,7 +48,6 @@ export const EGRESS_RUN_ARGS = [
 ];
 
 const digest = (value) => createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex");
-const templatesDir = fileURLToPath(new URL("../deploy/", import.meta.url));
 export function setupCommand(bin, args, { cwd, env, timeout = 15_000 } = {}) {
 	return new Promise((done) => {
 		try { execFile(bin, args, { cwd, env, timeout, maxBuffer: 256 * 1024, killSignal: "SIGKILL" }, (error, stdout, stderr) => done({ code: error ? typeof error.code === "number" ? error.code : null : 0, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") })); }

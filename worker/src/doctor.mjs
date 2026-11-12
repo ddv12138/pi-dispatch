@@ -87,7 +87,7 @@ import { deploymentVenueEnv, sharedShellIgnored } from "./deployment-venue.mjs";
 import { readDeploymentEnv, resolveServiceEnv, serviceEnvFileOf, serviceEnvLoader } from "./service-env.mjs";
 import { imageRefProblem, jobImageFix, pullOffered } from "./image-ref.mjs";
 import { PROXY_STATE_FORMAT, parseProxyState, rulesIncludeEndpoints, shippedProxyDrift } from "./egress-proxy-state.mjs";
-import { PACKAGED_EGRESS_PROXY_CONF, PACKAGE_VERSION, judgeProxyConfCopy, packageCopyName, readPackagedProxyConf } from "./egress-conf-copy.mjs";
+import { PACKAGED_EGRESS_PROXY_CONF, RELEASE_VERSION, judgeProxyConfCopy, packageCopyName, readPackagedProxyConf } from "./egress-conf-copy.mjs";
 import { ABSENT, ASSERTED, BACKENDS, DAEMON_APPLIES_BOUNDS, DEFAULT_BACKEND, DOCKER_ENDPOINT_LOCAL, OBSERVATION_FIX, OBSERVATIONS, PROPERTY_NAMES, RUNTIME_ADDS_NO_MOUNTS, HOST_ROUTE_LAN, HOST_ROUTE_REFUTED, HOST_ROUTE_WORKS, backendRefusals, declarationOf, floorShortfall, hostRouteFor, isProxyLocalHost, parseBackendFloor, parseBackendList, unarmedFloor, unobservedFloor, venuesOf } from "./backends.mjs";
 import { buildDockerRunArgs, containerSpec } from "./docker-run.mjs";
 import { observeHost } from "./runtime-observations.mjs";
@@ -280,7 +280,7 @@ export async function runDoctor(shellVars = process.env, deps = {}) {
 		readOverlayFile,
 		// Issue #556: the overlay models.json's lstat, for tests that need a socket or a device a test cannot make.
 		lstatOverlayFile,
-		// Issue #484: how a copy of the proxy's rules is read, and the installed package's copy it is compared with.
+		// Issue #484: how a copy of the proxy's rules is read, and the shipped copy it is compared with.
 		readProxyConf,
 		readPackagedProxyConf: readPackagedConf,
 		isAlive = defaultIsAlive,
@@ -482,7 +482,7 @@ export function doctorResultsRecord({ checks, liveRendered = [], seams, env, at,
 	const secrets = secretValuesIn(env, service.fromFile, service.extraFromFile, fileSide);
 	const worker = by?.worker === true;
 	const every = worker && Number.isSafeInteger(by.every) ? by.every : seams.publishTo?.every;
-	return buildDoctorRecord({ checks, ids, at, version: PACKAGE_VERSION, every, secrets, by: { uid: process.geteuid?.() ?? null, worker } });
+	return buildDoctorRecord({ checks, ids, at, version: RELEASE_VERSION, every, secrets, by: { uid: process.geteuid?.() ?? null, worker } });
 }
 
 async function publishResults({ seams, publishDoctor, writeErr, record }) {
@@ -2514,7 +2514,7 @@ export async function collectChecks(shellVars, seams) {
 	// Issue #761: the pi-dispatch versions the live workers report, and this doctor's own against this host's running
 	// worker, after the peers block so the second is said on a single host too. Workers only: a receiver's status row is
 	// never a doctor input (INT-RECEIVER-STATUS-KEY).
-	checks.push(...fleetVersionChecks({ installed: PACKAGE_VERSION, self: selfRow, selfName: workerNameOf(declaredWorkerName), peers }));
+	checks.push(...fleetVersionChecks({ installed: RELEASE_VERSION, self: selfRow, selfName: workerNameOf(declaredWorkerName), peers }));
 	section("capacity");
 	// Issue #599, phase 2: how busy each host was over the last 7 days, one fact line per host, never a warning (nothing
 	// decides on it). On every deployment, a single host too: its own files are read when the run mirror is not. Read from
@@ -5916,7 +5916,7 @@ function statIsDirectory(path) {
 }
 
 /**
- * Issue #484: one copy of the proxy's rules against the installed package's (`judgeProxyConfCopy`), as the line doctor
+ * Issue #484: one copy of the proxy's rules against the shipped one (`judgeProxyConfCopy`), as the line doctor
  * prints, or null for nothing to say. SILENT when the two are identical, and when the copy is absent, since whatever
  * mounts it reports that already (docker: the missing-file and directory lines; podman: the proxy's own state line).
  *
@@ -5933,7 +5933,9 @@ function proxyConfCopyCheck({ path, name, seams, skip = () => false, refresh }) 
 	const judged = judgeProxyConfCopy({ path, read: readProxyConf, readPackaged });
 	if (judged.state === "absent" || judged.state === "same") return null;
 	if (judged.state === "no-package") {
-		return { ok: false, warn: true, label: `${name} could not be compared with the package's copy, which could not be read (${PACKAGED_EGRESS_PROXY_CONF}: ${judged.error})`, fix: "the installed package is missing a file it ships; reinstall it (`npm i -g @edgehero/pi-dispatch`, or the way it was installed), then re-run doctor" };
+		// The shipped copy is a file in the checkout or image this code runs from, never an installed package: a deployment
+		// is a clone of the repository and the images built from it (deploy/worker.Dockerfile copies the whole repo).
+		return { ok: false, warn: true, label: `${name} could not be compared with the shipped copy, which could not be read (${PACKAGED_EGRESS_PROXY_CONF}: ${judged.error})`, fix: `the checkout or image this code runs from is missing ${PACKAGED_EGRESS_PROXY_CONF}: in a clone, restore it with \`git checkout -- deploy/egress-proxy.conf\`; in a container, pull the worker image again (\`docker compose pull\`), then re-run doctor` };
 	}
 	if (judged.state === "unreadable") {
 		return { ok: false, warn: true, label: `${name} could not be read (${judged.error}), so whether it matches ${packageCopyName()} is not known`, fix: `make ${path} readable by this account, then re-run doctor` };
@@ -7695,7 +7697,7 @@ const rowVersion = (v) => (typeof v === "string" && ROW_VERSION_RE.test(v) ? v :
 
 /**
  * The fleet's versions (issue #761): one `fleet.versions` check, or none. PURE.
- *   - `installed`: this doctor's own package version (`PACKAGE_VERSION`), null when it could not be read;
+ *   - `installed`: this doctor's own release version (`RELEASE_VERSION`), null when it could not be read;
  *   - `self`: this host's own registry row (its worker's), null when it publishes none; `selfName` its name;
  *   - `peers`: every other live worker's row.
  * A WARNING when the live workers do not all report one version (an unreadable one, which a worker publishes as `""`

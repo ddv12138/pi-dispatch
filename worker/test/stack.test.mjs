@@ -16,7 +16,7 @@ import { STACK_KEYS, describeRollBack, judgeValkeyListeners, journalWrite, manag
 import { SYSTEMD_259_ENV_BYTES, SYSTEMD_259_ENV_FILES } from "./helpers/systemd-env-259.mjs";
 import { systemdEnvFile } from "./helpers/systemd-env-parse.mjs";
 
-const DEPLOY_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "deploy");
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const DEPLOY_AT = "/srv/pi-deploy";
 const HOME = "/home/tester";
 const TEST_PASSWORD = "0123456789abcdef".repeat(4);
@@ -326,7 +326,7 @@ test("#447 gate round 1: a port of systemd's parser, pinned to every measured ro
 test("#447 gate round 1: `.env.example` spells the venue keys in comments, which alone never refuses a file", () => {
 	// `init` copies it, so gating on any spelling refused every docker deployment with an unrelated odd line in it.
 	// Measured on systemd 259 with the shipped file plus each tail: neither sets a venue key.
-	const example = readFileSync(join(DEPLOY_DIR, "..", ".env.example"), "utf8");
+	const example = readFileSync(join(REPO_ROOT, ".env.example"), "utf8");
 	assert.match(example, /^# PI_BACKENDS=$/m, "the premise: the shipped example spells the key in a comment");
 	assert.deepEqual(readStackKeys(`${example}FOO-BAR="x\nOTHER=1\n"\n`), { keys: {} }, "a non-identifier key's value, and no key spelled outside comments");
 	assert.deepEqual(readStackKeys(`${example}X=a Y=0\nunset Z\n`, { loader: "shell" }), { keys: {} }, "the shells' hazards, the same");

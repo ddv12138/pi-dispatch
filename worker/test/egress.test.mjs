@@ -501,8 +501,8 @@ test("`local` through podman-docker on Podman 4.9: the template error sends the 
 // Issue #428: the proxy rules' address deny. Its ORDER is the property, twice over: before every allow, or a listed
 // name resolving to the host's loopback is let through; and with `allowed` BEFORE `to_host_local` in the line, or squid
 // resolves every name a job asks for, listed or not (`dst` resolves, and squid stops at the first ACL that fails), a
-// DNS channel out of an egress-armed job (measured with debug_options 78,3). Read off the shipped file, the worker's
-// mirror being pinned byte-identical elsewhere (publish.test.mjs).
+// DNS channel out of an egress-armed job (measured with debug_options 78,3). Read off the shipped file, the one
+// deploy/egress-proxy.conf there is (worker/test/deploy-layout.test.mjs).
 test("the proxy denies a listed name resolving to this host's loopback or link-local, first, and resolves no unlisted name (#428)", async () => {
 	const { readFileSync } = await import("node:fs");
 	const conf = readFileSync(new URL("../../deploy/egress-proxy.conf", import.meta.url), "utf8");
@@ -557,19 +557,17 @@ test("plain HTTP reaches a listed host on port 80 only: `deny !Safe_ports !CONNE
 // Issue #503: the declared model endpoints' include. Its ORDER is the property: pi tunnels every provider call, so a call
 // to a model server is a CONNECT to its port, and first match wins, so the include must come before the port-443 deny
 // or that deny refuses it before any allow inside is read; and after the address deny, so a LISTED name resolving to
-// the host's loopback is still refused first. Read off the shipped file and its published mirror.
+// the host's loopback is still refused first. Read off the shipped file.
 test("the proxy's rules include the model endpoints between the address deny and the port-443 deny (#503)", async () => {
 	const { readFileSync } = await import("node:fs");
-	for (const path of ["../../deploy/egress-proxy.conf", "../deploy/egress-proxy.conf"]) {
-		const conf = readFileSync(new URL(path, import.meta.url), "utf8");
-		const lines = conf.split("\n").map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#"));
-		const include = lines.filter((line) => /^include\s/.test(line));
-		assert.deepEqual(include, ["include /etc/pi-dispatch/model-endpoints.conf"], `${path}: one include, of the mounted path`);
-		const at = lines.indexOf(include[0]);
-		assert.ok(at > lines.indexOf("http_access deny allowed to_host_local"), `${path}: after the address deny`);
-		assert.ok(at < lines.indexOf("http_access deny CONNECT !SSL_ports"), `${path}: before the port-443 deny`);
-		assert.equal(lines[at - 1], "http_access deny allowed to_host_local", `${path}: directly after it`);
-	}
+	const conf = readFileSync(new URL("../../deploy/egress-proxy.conf", import.meta.url), "utf8");
+	const lines = conf.split("\n").map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#"));
+	const include = lines.filter((line) => /^include\s/.test(line));
+	assert.deepEqual(include, ["include /etc/pi-dispatch/model-endpoints.conf"], "one include, of the mounted path");
+	const at = lines.indexOf(include[0]);
+	assert.ok(at > lines.indexOf("http_access deny allowed to_host_local"), "after the address deny");
+	assert.ok(at < lines.indexOf("http_access deny CONNECT !SSL_ports"), "before the port-443 deny");
+	assert.equal(lines[at - 1], "http_access deny allowed to_host_local", "directly after it");
 });
 
 // --- issue #452, gate round 3: the ONE detach helper, and the gate every teardown asks through it ---------------------
