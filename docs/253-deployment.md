@@ -87,10 +87,13 @@ docker compose --env-file .env -f deploy/docker-compose.yml --profile receiver r
 
 ## 资源约束
 
-这台主机是 4 核（CentOS 7，cgroup v1）。`.env` 设 `PI_CONCURRENCY=1`、`PI_HOST_CPU_BUDGET=3`：
-一次只跑一个 job，单容器的 `--cpus` 由 3 CPU 的 host budget 决定，留 1 核给 worker、Valkey 和宿主。
-`PI_JOB_CPUS=1` 只用于预算记账和 cpu-shares，不是硬上限。cgroup v1 上 worker 启动会报
+这台主机是 4 核（CentOS 7，cgroup v1）。当前 `.env` 是 `PI_CONCURRENCY=6`、`PI_HOST_CPU_BUDGET=6`：
+6 个 job 可以同时跑，单容器的 `--cpus` 是 4（6 CPU 的预算被运行时的 4 核封顶），cgroup v1 下父 cgroup
+的聚合配额落不下去，因此存在明显超卖。
+
+`PI_JOB_CPUS=1` 只用于预算记账和 cpu-shares，不是硬上限；真正限制单容器的是 `--cpus`。worker 启动会报
 `cpu_reserve_fail_open reason=cgroup-v1`，意思是父 cgroup 的聚合配额落不下去，不是单容器没有限制。
+磁盘问题解决前，建议把 `PI_CONCURRENCY` 降到 1–2、`PI_HOST_CPU_BUDGET` 降到 3。
 
 ## 更新与回滚
 
@@ -219,4 +222,5 @@ cp -r ~/.m2/repository/com/sscloud/xxx/yyy/zzz /root/pi-dispatch/maven-repo/host
 
 三个叠加因素：镜像清理的磁盘 I/O 与 Maven 首次构建（1033 次依赖请求、约 1000 个小文件）重叠；
 `PI_HOST_CPU_BUDGET=6` 在 4 核机器上超过物理核数，6 并发没有聚合配额；BullMQ 的 stall/失败路径不负责
-停容器。已把 `PI_CONCURRENCY` 降到 1、`PI_HOST_CPU_BUDGET` 降到 3。"失败后停容器"仍需代码修复。
+停容器。建议在磁盘问题解决前把 `PI_CONCURRENCY` 降到 1–2、`PI_HOST_CPU_BUDGET` 降到 3；当前配置仍是
+6/6。"失败后停容器"仍需代码修复。
