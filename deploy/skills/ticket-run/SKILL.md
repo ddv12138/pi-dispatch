@@ -35,15 +35,58 @@ test -n "$TICKET" || { echo "no ticket number"; exit 0; }
 glab api "projects/:id/issues/$TICKET" > /tmp/ticket.json
 ```
 
-用 Python 读取 `state`、`labels`、`description`、`title`，然后按顺序检查：
+用 Python 读取 `state`、`labels`、`description`、`title`，再解析票面结构。票面有两种来源，都要认：
+
+- 旧格式：正文里的 `Parent: #<spec>` / `Spec: #<spec>`、`Blocked by: #2, #5`、`## 行为契约`、`## 验收标准`；
+- `to-tickets` 格式：`## Parent` 小节（正文里第一个 `#n`）、`## Blocked by` 小节（`#n` 列表，或 `None`）、`## What to build`、`## Acceptance criteria`。
+
+用下面这段解析，不要自己临时写正则：
+
+```bash
+python3 - <<'PY'
+import json, re
+d = json.load(open('/tmp/ticket.json'))
+desc = d.get('description') or ''
+
+def section(*heads):
+    pat = r'(?ms)^##\s*(?:%s)\s*$(.*?)(?=^##\s|\Z)' % '|'.join(re.escape(h) for h in heads)
+    m = re.search(pat, desc)
+    return m.group(1) if m else ''
+
+def refs(text):
+    return [int(n) for n in re.findall(r'#(\d+)', text)]
+
+spec = refs(section('Parent', 'Spec'))
+if spec:
+    spec = spec[0]
+else:
+    m = re.search(r'(?mi)^(?:Parent|Spec):\s*#?(\d+)', desc)
+    spec = int(m.group(1)) if m else None
+
+blocked = section('Blocked by')
+if not blocked:
+    m = re.search(r'(?mi)^Blocked by:\s*(.+)$', desc)
+    blocked = m.group(1) if m else ''
+blockers = [] if re.match(r'(?i)^\s*(?:[-*]\s*)?(?:none|无|没有)', blocked.strip()) else refs(blocked)
+
+print(json.dumps({
+    'state': d.get('state'),
+    'labels': d.get('labels') or [],
+    'title': d.get('title') or '',
+    'spec': spec,
+    'blockers': blockers,
+    'contract': bool(re.search(r'(?mi)^##\s*(行为契约|Behaviour contract|Behavior contract|Contract|What to build)\s*$', desc)),
+    'acceptance': bool(re.search(r'(?mi)^##\s*(验收标准|Acceptance criteria|Acceptance)\s*$', desc)),
+}, ensure_ascii=False))
+PY
+```
+
+然后按顺序检查。后续的 `$SPEC` 取自输出里的 `spec`，`$BLOCKERS` 取自 `blockers`：
 
 1. `state != "opened"`：票已关闭。移除可能残留的 `ready-for-agent` 和 `agent-vibing`，正常结束；不要重新实现。
 2. `agent-vibing` 在 `labels` 里：这张票已被领取，或 MR 已开、等合并。正常结束，不评论、不改标签。
 3. `ready-for-agent` 不在 `labels`：没有排队。正常结束，不评论。
-4. 从正文解析 spec：
-   - 规范写法：`Parent: #<spec>`；
-   - 兼容旧写法：`Spec: #<spec>`；
-   - 两者都没有：评论“缺少 `Parent: #<spec>`”，加 `needs-info`，移除 `ready-for-agent`，正常结束。
+4. `spec` 为空：评论“缺少 `Parent: #<spec>` 或 `## Parent`”，加 `needs-info`，移除 `ready-for-agent`，正常结束。
 5. 读取 spec issue：
 
 ```bash
@@ -51,13 +94,13 @@ glab api "projects/:id/issues/$SPEC" > /tmp/spec.json
 ```
 
    spec 不存在或已关闭：评论并加 `needs-info`，移除 `ready-for-agent`，正常结束。
-6. 解析 `Blocked by: #2, #5`（逗号、空格均可）。逐个读取 blocker 的 `state`；只要有一个仍是 `opened`：
+6. `blockers` 逐个读取 blocker 的 `state`；只要有一个仍是 `opened`：
    - **直接结束（exit 0），什么都不做**：不评论、不改标签、不建分支、不开 MR、不加 `agent-vibing`。
    - `ready-for-agent` 原样留在票上；等 blocker 合并后由 `ticket-merge` 重新触发。
    - runner 自己的 `statusComment` 仍可能更新一条 job 状态评论；这不是本技能写的评论。
-7. 正文必须同时有行为契约和验收标准。识别中文或英文标题，例如
-   `## 行为契约` / `## Behaviour contract` / `## Contract` 和
-   `## 验收标准` / `## Acceptance criteria` / `## Acceptance`。
+7. `contract` 和 `acceptance` 都必须为 true。`contract` 认
+   `## 行为契约` / `## Behaviour contract` / `## Behavior contract` / `## Contract` / `## What to build`，
+   `acceptance` 认 `## 验收标准` / `## Acceptance criteria` / `## Acceptance`。
    缺失：加 `needs-info`，评论缺哪一段，移除 `ready-for-agent`，正常结束。
    两段互相矛盾、无法确定 seam：加 `ready-for-human`，评论矛盾点，移除 `ready-for-agent`，正常结束。
 
@@ -140,7 +183,8 @@ fi
 
 ## 5. 用 tdd 实现
 
-调用 `tdd` 技能。把票里的“行为契约”当作已经和用户确认过的 seam；AFK 场景不再问用户。
+调用 `tdd` 技能。把票里的“行为契约”（`## 行为契约`，或 `to-tickets` 的 `## What to build`）当作已经和
+用户确认过的 seam；AFK 场景不再问用户。
 
 - 只在公开行为上写测试，按 red → green 的垂直切片推进。
 - 不要为了让测试通过而改范围外的公开 API，不引入新依赖。

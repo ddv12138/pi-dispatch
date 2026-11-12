@@ -83,10 +83,12 @@ case "$MR_STATE" in
 esac
 ```
 
-票必须是 `opened`；正文必须有 `Parent: #<spec>`（兼容 `Spec: #<spec>`），且 `<spec>` 等于 target 的
-编号。读取 spec issue，spec 必须是 `opened`，否则正常结束。`Blocked by: #<n>, ...` 中任一 blocker 仍为
-`opened`，就不合并。缺 `Parent:`、行为契约或验收标准时，评论原因并加 `needs-info`，移除
-`ready-for-agent` 和 `agent-vibing`，正常结束；这是数据问题，不是合并失败。
+票必须是 `opened`；正文必须有 spec 归属，且 `<spec>` 等于 target 的编号。两种写法都认：
+`Parent: #<spec>` / `Spec: #<spec>`，或 `## Parent` 小节里的第一个 `#n`。读取 spec issue，spec 必须
+是 `opened`，否则正常结束。`Blocked by` 同样两种都认：正文里的 `Blocked by: #<n>, ...`，或
+`## Blocked by` 小节里的 `#n` 列表（`None` / `无` 表示无阻塞）。任一 blocker 仍为 `opened`，就不合并。
+缺 spec 归属、行为契约（`## 行为契约` 或 `## What to build`）或验收标准时，评论原因并加 `needs-info`，
+移除 `ready-for-agent` 和 `agent-vibing`，正常结束；这是数据问题，不是合并失败。
 
 `merge_status == "cannot_be_merged"`：评论冲突，加 `ready-for-human`，移除 `ready-for-agent` 和
 `agent-vibing`，正常结束。
@@ -237,10 +239,14 @@ if isinstance(issues, dict):
 for issue in issues:
     iid = issue.get("iid")
     description = issue.get("description") or ""
-    match = re.search(r"(?mi)^Blocked by:\s*(.+)$", description)
-    if not match:
+    section = re.search(r"(?ms)^##\s*Blocked by\s*$(.*?)(?=^##\s|\Z)", description)
+    body = section.group(1) if section else ""
+    if not body:
+        m = re.search(r"(?mi)^Blocked by:\s*(.+)$", description)
+        body = m.group(1) if m else ""
+    if not body or re.match(r"(?i)^\s*(?:[-*]\s*)?(?:none|无|没有)", body.strip()):
         continue
-    blockers = [int(n) for n in re.findall(r"#(\d+)", match.group(1))]
+    blockers = [int(n) for n in re.findall(r"#(\d+)", body)]
     if int(closed) not in blockers:
         continue
     labels = issue.get("labels") or []
