@@ -304,7 +304,12 @@ services:
     # where every Java job's dependencies come from, so a floating tag would let an upstream rebuild
     # change that with no commit anywhere. Multi-arch manifest list (amd64 + arm64 verified), so a
     # build/pull from either host architecture resolves to the same bytes.
-    image: nginx@sha256:713fc2ebfd92e8217db451477182ee91944b123d2b1ee9fd5a8c6e91ca6c3a11
+    # 1.28-alpine deliberately, NOT the floating nginx:alpine (1.29.x at this pin): the 253 host is
+    # CentOS 7, kernel 3.10, and the 1.29 image crash-loops there at startup -- `pwrite()
+    # "/run/nginx.pid" failed (1: Operation not permitted)` on a bare `docker run` of the image, with
+    # no volumes and no config (measured 2026-11-12). 1.27.5 and 1.28.3 start and serve fine on the
+    # same host, so this pins the newest line that works; re-measure if the host's kernel ever moves.
+    image: nginx@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236
     # An explicit name, because the egress allowlist and the job-side mirror URL both name THIS
     # literal: same reasoning as the egress proxy's container_name above.
     container_name: pi-dispatch-maven-proxy
