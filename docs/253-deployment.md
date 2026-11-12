@@ -10,7 +10,7 @@
 
 - Compose 项目 `deploy`，来自唯一随仓库发布的文件 `deploy/docker-compose.yml`。没有 override 文件：文件读取
   的每个值都是 compose 变量或 `.env` 里的键。`deploy/` 放该文件、`worker.Dockerfile`、
-  `worker.Dockerfile.dockerignore`、`egress-proxy.conf`、`skills/`、`triggers.json` 和
+  `worker.Dockerfile.dockerignore`、`egress-proxy.conf`、`maven-proxy.conf`、`skills/`、`triggers.json` 和
   `triggers.ticket.example.json`——没有宿主机服务定义，也没有环境包装脚本。其中 `skills/`（ticket-merge、
   ticket-run 两个 flow）是必须项：compose 把它只读挂载到 worker 容器的 `/opt/pi-skills`，再由 worker 复制进
   每个 job 的 `/job/trigger-skills`；挂载源缺失时 Docker 会静默创建空目录，job 不报错但拿不到 skill。
@@ -30,14 +30,16 @@
   拉取，不在现场构建。它发布 `${PI_RECEIVER_PUBLISH:-127.0.0.1}:3000`，这台主机在 `.env` 里设
   `PI_RECEIVER_PUBLISH=192.168.99.253`。
 - 端口：console `4790` 监听所有宿主接口、明文 HTTP；Valkey `127.0.0.1:6379`；receiver
-  `192.168.99.253:3000`。
+  `192.168.99.253:3000`。egress-proxy 和 maven-proxy 都不发布任何宿主端口，只在容器网络内可达。
 - Egress 已启用（`PI_EGRESS` 未设置），job 前面有 `pi-dispatch-egress-proxy` 容器。
+- Maven 已启用（`maven` profile）：`pi-dispatch-maven-proxy` 为 Java job 缓存公开依赖并只读托管私有构件，
+  详见下文 "Maven 依赖代理"。
 - 运行状态在 `/root/pi-dispatch/runtime` 下：`jobs/`、`logs/`、`sandboxes/`、`tmp/`、`home/`、trigger 与
   settings 文件，以及只读 job overlay `pi-global/`。生效的触发器文件是 `runtime/triggers.json`：worker 与
   console 的 `PI_TRIGGERS_FILE` 由 compose 固定指向它，receiver 的挂载源默认是 `deploy/triggers.json`，但这
   台部署的 `.env` 设了 `PI_TRIGGERS_FILE=/root/pi-dispatch/runtime/triggers.json`，三个服务因此读同一个
   文件。`deploy/triggers.json` 只是 init 脚手架，内容与 runtime 文件无关，改它不生效。
-- 运行五个容器：`valkey`、`worker`、`console`、`receiver`、`egress-proxy`。
+- 运行六个容器：`valkey`、`worker`、`console`、`receiver`、`egress-proxy`、`maven-proxy`。
 
 ## 运行 compose
 
@@ -102,20 +104,17 @@ job 镜像不走 CI：从 checkout 在本机构建并推送，`./image/publish.s
 | `docker.io/ddv12138/pi-job-java21` | Java flow，经由该 trigger 的 `run.image` |
 
 两个镜像都带 `python3`、三个 baked skill 和本仓库的 runner；Java 那个额外带 JDK 21 和 Maven。这台主机的
-默认是 `4.3.5`，即当前发布版本。
+默认是 `4.3.7`，即当前发布版本。
 
 worker 服务把默认 job 镜像作为 compose 插值默认值，`.env` 覆盖它，所以只有 `.env` 缺少该键时随仓库的默认值
-才生效。这台主机的 `.env` 把 `PI_JOB_IMAGE` 固定为 `docker.io/ddv12138/pi-job:4.3.5`；trigger 还可以用
-`run.image` 覆盖到别的 tag——2026-11-11 核对时 runtime/triggers.json 里有两处覆盖，都指向
-`docker.io/ddv12138/pi-job-java21:4.3.5-m2seed`。
+才生效。这台主机的 `.env` 把 `PI_JOB_IMAGE` 固定为 `docker.io/ddv12138/pi-job:4.3.7`；两个 trigger 都用
+`run.image` 覆盖为 `docker.io/ddv12138/pi-job-java21:4.3.7`（2026-11-12 核对）。
 
-主机上的 job 镜像不止默认那一个（2026-11-11 核对并清理后共 3 个）：`pi-job:4.3.5`（默认）、
-`pi-job-java21:4.3.5`（当前发布版）和 `pi-job-java21:4.3.5-m2seed`（两个 trigger 的 `run.image` 正指着）。
-清理前的旧版本 tag（`4.3.2/4.3.3/4.3.4` 和一个手工调试 tag）已从主机删除——版本 tag 在 Docker Hub 上
-不可变，需要回滚时代理在线重新 pull 即可，主机不常备旧镜像。`4.3.5-m2seed` 不是 CI 或 `image/publish.sh`
-的产物（脚本只打 `<版本>` 和 `latest` 两个 tag）：它是 2026-11-10 在主机上从 `/root/pi-dispatch/m2-seed/`
-现场构建的实验镜像——一个约 1 GB 的 `sscloud-m2.tgz` Maven 仓库快照加构建上下文，把 Java job 的 Maven
-依赖缓存烘进镜像，job 不必每次走网络拉依赖。仓库里没有它的构建脚本，主机重建后无法从仓库复现。
+2026-11-12 清理后，主机上与这台部署相关的 job 镜像只有两个：`pi-job:4.3.7`（默认）和
+`pi-job-java21:4.3.7`（两个 trigger 的 `run.image` 正指着）。4.3.6 及更早的版本 tag、`4.3.5-m2seed` 和
+`4.3.6-m2seed` 变体都已从主机删除——版本 tag 在 Docker Hub 上不可变，需要回滚时代理在线重新 pull 即可，
+主机不常备旧镜像。`m2seed` 不再是发布路径：4.3.7 起 Java 的 Maven 依赖由运行时缓存代理提供，见下文
+"Maven 依赖代理"。
 
 job 以 `--pull=never` 启动，运行时不拉取任何东西。`PI_JOB_IMAGE` 在创建容器时读取，所以运行中的容器一直用
 它创建时的值，直到 worker 被重建；`run.image` 指到的 tag 也必须在主机上现成存在，删镜像前先确认没有
@@ -130,11 +129,13 @@ maven.aliyun.com 并缓存在 `maven-cache` 卷（第一个 job 拉一次，后�
 构件从宿主机 `/root/pi-dispatch/maven-repo/hosted/` 只读服务。整条链路：
 
 ```
-job --(http:80)--> pi-dispatch-maven-proxy --(CONNECT 443)--> squid --> maven.aliyun.com
+job --(http:80)--> pi-dispatch-maven-proxy --(https:443)--> maven.aliyun.com
 ```
 
-maven-proxy 自己也没有直达外网的路由，它对 aliyun 的上游连接同样过 squid，所以
-`egress-allowlist.conf` 里必须同时有 `pi-dispatch-maven-proxy` 和 `maven.aliyun.com` 两行。
+两条链路是分开的。job 到 maven-proxy 受 squid 白名单约束，所以 `egress-allowlist.conf` 里必须有
+`pi-dispatch-maven-proxy` 这一行；maven-proxy 到 aliyun 由本容器直接出网——`egress-out` 是普通 bridge，
+带 NAT，这一跳不经过 squid，白名单也不约束它。`maven.aliyun.com` 留在白名单里只是为了 job 直连的兜底
+场景，不是 maven-proxy 的上游路径。
 
 启用：`--profile egress --profile maven up -d maven-proxy`。默认 `up` 不启动它，与 receiver/console/egress
 同一条 opt-in 约定。
@@ -152,7 +153,7 @@ PI_FORWARD_ENV=MAVEN_MIRROR_URL,MAVEN_PROXY_HOST,MAVEN_PROXY_PORT
 ```
 
 `MAVEN_PROXY_NONPROXY` 不设：转发器跳过空值，渲染器把缺省当作空 nonProxyHosts，与 4.3.6 镜像内烘焙的
-行为一致。job 容器没有绕过 squid 的路由，maven-proxy 自身也必须走 squid。
+行为一致。job 容器没有绕过 squid 的路由；maven-proxy 自身是直接出网，不走 squid。
 
 job 容器内的 `~/.m2/settings.xml` 由 runner 在准备阶段渲染（image/runner/src/maven-settings.mjs）：
 `MAVEN_MIRROR_URL` 或 `MAVEN_PROXY_HOST` 任一被转发进来就写，XML 形状与 Dockerfile.java21 的构建时模板

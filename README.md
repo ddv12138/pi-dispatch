@@ -83,7 +83,7 @@ CI(GitHub Actions)在每个 push 和 PR 上跑全量测试;合入 main 或打 `v
 | `admin/` | 网页控制台(`pi-dispatch-console`) |
 | `gateway/` | 可选的沙箱浏览器终端 |
 | `image/` | 任务镜像,以及镜像里的 runner |
-| `deploy/` | Compose 文件、worker 镜像、出网代理配置 |
+| `deploy/` | Compose 文件、worker 镜像、出网代理和 Maven 缓存代理配置 |
 | `docs/` | 253 服务器部署手册和 agent 技能说明 |
 | `launch/` | 控制台测试共用的固定部署和浏览器管线 |
 

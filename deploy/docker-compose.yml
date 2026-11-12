@@ -295,9 +295,11 @@ services:
   # It sits on egress-out beside the squid above, and NOTHING IS PUBLISHED. Its only clients are job
   # containers, which the worker puts on per-job `--internal` networks whose other member is that
   # squid; squid's shipped rules (deploy/egress-proxy.conf) pass a plain-HTTP request only on port
-  # 80, so this listener is port 80 and the maven-proxy.conf header comment draws the whole chain:
-  # job --(http:80)--> maven-proxy --(CONNECT 443)--> squid --> maven.aliyun.com. The name in the
-  # operator's egress-allowlist.conf is THIS container's literal name.
+  # 80, so this listener is port 80. The two hops are separate: job -> maven-proxy is the allowlisted
+  # one (the name the operator's egress-allowlist.conf must carry is THIS container's literal name),
+  # while maven-proxy -> maven.aliyun.com is this container's OWN direct egress over the egress-out
+  # bridge's NAT. That upstream hop does not pass through squid, and the allowlist constrains JOB
+  # containers only.
   maven-proxy:
     profiles: ["maven"]
     # Digest-pinned, same reasoning as the squid service above one screen: this container decides
