@@ -69,24 +69,56 @@ if not blocked:
     blocked = m.group(1) if m else ''
 blockers = [] if re.match(r'(?i)^\s*(?:[-*]\s*)?(?:none|无|没有)', blocked.strip()) else refs(blocked)
 
+def has_heading(*names):
+    return any(re.search(r'(?mi)^##\s*%s\s*$' % re.escape(n), desc) for n in names)
+
+contract = has_heading('行为契约', 'Behaviour contract', 'Behavior contract', 'Contract', 'What to build')
+acceptance = has_heading('验收标准', 'Acceptance criteria', 'Acceptance')
+# to-spec 的 spec 模板必然有 `## Problem Statement`，再加 `## Solution` 或 `## User Stories`；ticket 必然有
+# contract 或 acceptance。两个否定条件用来排除正文里引用了 spec 段落的真 ticket。
+is_spec = not contract and not acceptance and has_heading('Problem Statement') and has_heading('Solution', 'User Stories')
+
 print(json.dumps({
     'state': d.get('state'),
     'labels': d.get('labels') or [],
     'title': d.get('title') or '',
     'spec': spec,
     'blockers': blockers,
-    'contract': bool(re.search(r'(?mi)^##\s*(行为契约|Behaviour contract|Behavior contract|Contract|What to build)\s*$', desc)),
-    'acceptance': bool(re.search(r'(?mi)^##\s*(验收标准|Acceptance criteria|Acceptance)\s*$', desc)),
+    'contract': contract,
+    'acceptance': acceptance,
+    'is_spec': is_spec,
 }, ensure_ascii=False))
 PY
 ```
 
-然后按顺序检查。后续的 `$SPEC` 取自输出里的 `spec`，`$BLOCKERS` 取自 `blockers`：
+然后按顺序检查。后续的 `$SPEC` 取自输出里的 `spec`，`$BLOCKERS` 取自 `blockers`，`$IS_SPEC` 取自 `is_spec`：
 
 1. `state != "opened"`：票已关闭。移除可能残留的 `ready-for-agent` 和 `agent-vibing`，正常结束；不要重新实现。
 2. `agent-vibing` 在 `labels` 里：这张票已被领取，或 MR 已开、等合并。正常结束，不评论、不改标签。
 3. `ready-for-agent` 不在 `labels`：没有排队。正常结束，不评论。
-4. `spec` 为空：评论“缺少 `Parent: #<spec>` 或 `## Parent`”，加 `needs-info`，移除 `ready-for-agent`，正常结束。
+4. `is_spec` 为 true，或 `spec` 为空：
+   - `is_spec` 为 true：这是一张 spec 票，不是 ticket，`ticket-run` 不处理它。先查重，还没有下面的标记才评论，
+     然后**正常结束（exit 0）**：不改任何标签、不建分支、不开 MR、不加 `agent-vibing`。
+
+     ```bash
+     glab api "projects/:id/issues/$TICKET/notes?sort=asc&per_page=100" > /tmp/notes.json
+     python3 -c "import json; marker = '<!-- pi-dispatch: spec-is-not-a-ticket -->'; print('commented' if any(marker in (n.get('body') or '') for n in json.load(open('/tmp/notes.json'))) else 'fresh')"
+     ```
+
+     输出 `fresh` 时发评论，输出 `commented` 时直接结束：
+
+     ```bash
+     printf '%s\n' \
+       '<!-- pi-dispatch: spec-is-not-a-ticket -->' \
+       '这是一张 spec 票，不是可实现的 ticket，`ticket-run` 不会处理它。' \
+       '' \
+       'spec 的执行流程已经停用。请用 `to-tickets` 把这张 spec 拆成 ticket，' \
+       '再给要开工的 ticket 打 `ready-for-agent`。本票保持原样。' \
+       > /tmp/spec-note.md
+     glab api --method POST "projects/:id/issues/$TICKET/notes" --field body=@/tmp/spec-note.md
+     ```
+   - 否则（`spec` 为空）：评论“缺少 `Parent: #<spec>` 或 `## Parent`”，加 `needs-info`，
+     移除 `ready-for-agent`，正常结束。
 5. 读取 spec issue：
 
 ```bash
