@@ -10,10 +10,12 @@
  *   1. The bot-loop guard runs UNCONDITIONALLY. Under a project access token the harness is a project
  *      member and would clear the access gate, so its own status comment is an event that passes -- an
  *      unbounded paid recursion. Gating this behind the access check would reintroduce exactly that loop.
- *   1.5. THEN the operator's allowlist (`GITLAB_ALLOWED_ACTORS`), when armed, so an unlisted actor costs no
- *      members lookup. It is a NARROWING beside step 2, never a replacement; `null` is the only unarmed
- *      value. This runs after the guard, which is why a list naming the token's own account needs
- *      PI_RECEIVER_ALLOW_SELF -- start.mjs refuses that combination rather than booting a dead list.
+ *   1.5. THEN the operator's allowlist (`GITLAB_ALLOWED_ACTORS`), when armed. It is a NARROWING beside
+ *      step 2, never a replacement; `null` is the only unarmed value. The receiver has ALREADY resolved
+ *      the actor's access level by this point (that lookup happens before this pure gate is called), so
+ *      this step decides whether the verdict is used at all, not whether it is fetched. It runs after the
+ *      guard, which is why a list naming the token's own account needs PI_RECEIVER_ALLOW_SELF --
+ *      start.mjs refuses that combination rather than booting a dead list.
  *   2. THEN the access gate, then the route.
  *
  * WHY THE ACCESS GATE COVERS LABEL TRIGGERS TOO, unlike GitHub.
@@ -73,12 +75,12 @@ export function filterGitLab(subset, triggers, knownFlows, selfId, authorized, d
 		return { enqueue: false, reason: "self" };
 	}
 
-	// (1.5) The operator's allowlist, when armed. NARROWING ONLY, and deliberately checked before the
-	// access lookup's verdict is consulted: an actor nobody listed is refused without even an explanatory
-	// role check, and an actor who IS listed still has to clear step (2), so removing somebody from the
-	// project cannot be undone by a stale list. `null` is the sentinel -- an empty Set is refused at boot
-	// (config.mjs) and must never reach here, because `has()` on it would refuse everyone while looking
-	// like a configured allowlist.
+	// (1.5) The operator's allowlist, when armed. NARROWING ONLY, and evaluated before the access
+	// verdict is trusted: an actor nobody listed is refused even when the lookup found them eligible, and
+	// an actor who IS listed still has to clear step (2), so removing somebody from the project cannot be
+	// undone by a stale list. `null` is the sentinel -- an empty Set is refused at boot (config.mjs) and
+	// must never reach here, because `has()` on it would refuse everyone while looking like a configured
+	// allowlist.
 	if (allowedActors !== null && !allowedActors.has(subset.user.id)) {
 		return { enqueue: false, reason: "actor-not-allowed" };
 	}

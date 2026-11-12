@@ -524,10 +524,10 @@ test("a listed actor is admitted only if the access gate also passes -- the list
 	assert.deepEqual(run(issuePayload(), { allowedActors: new Set([MEMBER]), authorized: false }), { enqueue: false, reason: "author-not-allowed" });
 });
 
-test("an unlisted actor is refused before the access verdict is consulted (#cost, #order)", () => {
-	// `authorized` is false AND the actor is unlisted: the reason must be the allowlist's, because the
-	// receiver never even asks GitLab for a role it will not use. A regression that moved this check after
-	// the gate would turn every refused stranger into one more members lookup.
+test("an unlisted actor's refusal is the allowlist's, not the access verdict's (#order)", () => {
+	// `authorized` is false AND the actor is unlisted. The lookup itself already ran in the receiver -- the
+	// gate below is pure, so nothing here can save that call -- but the REASON must still be the allowlist's,
+	// which pins that step (1.5) decides before step (2) is consulted.
 	assert.deepEqual(run(issuePayload(), { allowedActors: new Set([101]), authorized: false }), { enqueue: false, reason: "actor-not-allowed" });
 });
 
